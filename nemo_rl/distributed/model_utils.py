@@ -189,6 +189,7 @@ def from_parallel_logits_to_logprobs(
 
     return probs[:, :-1]
 
+
 def get_logprobs_from_vocab_parallel_logits(
     vocab_parallel_logits: DTensor,
     input_ids: torch.Tensor | DTensor,

@@ -17,11 +17,29 @@ import gc
 import os
 from collections import defaultdict
 from contextlib import AbstractContextManager, contextmanager, nullcontext
-from typing import Any, Generator, Iterable, Optional, Set, Union, cast
+from typing import Any, Generator, Iterable, Optional, cast
 
 import ray
 import torch
 from accelerate import init_empty_weights
+from nemo_automodel import NeMoAutoModelForCausalLM
+from nemo_automodel.components._transformers.utils import sliding_window_overwrite
+from nemo_automodel.components.distributed.cp_utils import (
+    create_context_parallel_ctx,
+    get_train_context,
+)
+from nemo_automodel.components.distributed.grad_utils import (
+    clip_grad_by_total_norm_,
+    get_grad_norm,
+)
+from nemo_automodel.components.distributed.parallelizer import (
+    fsdp2_strategy_parallelize,
+    unshard_fsdp2_model,
+)
+from nemo_automodel.components.distributed.tensor_utils import (
+    get_cpu_state_dict,
+    to_local_if_dtensor,
+)
 from torch import nn
 from torch.distributed.checkpoint.state_dict import (
     StateDictOptions,
@@ -32,31 +50,11 @@ from transformers import AutoConfig, AutoTokenizer
 from transformers.integrations.accelerate import find_tied_parameters
 from transformers.models.gemma3.modeling_gemma3 import Gemma3ForCausalLM
 
-from nemo_automodel import NeMoAutoModelForCausalLM
-from nemo_automodel.components._transformers.utils import sliding_window_overwrite
-from nemo_automodel.components.distributed.cp_utils import (
-    create_context_parallel_ctx, 
-    get_train_context,
-)
-from nemo_automodel.components.distributed.parallelizer import (
-    fsdp2_strategy_parallelize,
-    unshard_fsdp2_model,
-)
-from nemo_automodel.components.distributed.tensor_utils import (
-    get_cpu_state_dict,
-    to_local_if_dtensor,
-)
-from nemo_automodel.components.distributed.grad_utils import (
-    clip_grad_by_total_norm_,
-    get_grad_norm,
-)
-
 from nemo_rl.algorithms.interfaces import LossFunction, LossType
 from nemo_rl.distributed.batched_data_dict import BatchedDataDict
 from nemo_rl.distributed.model_utils import (
     get_logprobs_from_vocab_parallel_logits,
 )
-
 from nemo_rl.models.huggingface.common import ModelFlag
 from nemo_rl.models.policy import PolicyConfig
 from nemo_rl.models.policy.interfaces import (
@@ -327,35 +325,6 @@ class DTensorPolicyWorker:
             None
         )
         self._held_streamed_param_reference: Optional[dict[str, torch.Tensor]] = None
-
-    # Refer to nemo impl. Below is original comment.
-    # based on https://github.com/pytorch/torchtitan/blob/main/torchtitan/distributed/utils.py#L113
-    @staticmethod
-    def create_context_parallel_ctx(
-        cp_mesh: torch.distributed.device_mesh.DeviceMesh,
-        cp_buffers: list[torch.Tensor],
-        cp_seq_dims: list[int],
-        cp_no_restore_buffers: Set[torch.Tensor],
-        cp_rotate_method: Optional[str] = None,
-    ):
-        """Create a context parallel context.
-
-        Args:
-            cp_mesh (DeviceMesh): The device mesh for context parallel.
-            cp_buffers (list[torch.Tensor]): The buffers for context parallel.
-            cp_seq_dims (list[int]): The sequence dimensions for context parallel.
-            cp_no_restore_buffers (Set[torch.Tensor]): The no restore buffers for context parallel.
-            cp_rotate_method (str): The rotation method for context parallel, such as "allgather" or "addtoall".
-        """
-        if cp_rotate_method is not None:
-            set_rotate_method(cp_rotate_method)
-
-        return context_parallel(
-            cp_mesh,
-            buffers=cp_buffers,
-            buffer_seq_dims=cp_seq_dims,
-            no_restore_buffers=cp_no_restore_buffers,
-        )
 
     # Refer to nemo impl. Below is original comment.
     # based on https://github.com/pytorch/torchtitan/blob/cddd7dc809f36fe0ed51cdaaea0671c084d75442/torchtitan/distributed/utils.py#L178

@@ -17,7 +17,6 @@ import os
 from typing import Any
 
 import torch
-from transformers import AutoConfig
 
 from nemo_rl.distributed.worker_group_utils import get_nsight_config_if_pattern_matches
 
@@ -100,8 +99,6 @@ def get_gpu_info(model: torch.nn.Module) -> dict[str, Any]:
             if k.startswith("CUDA") or k in ["LOCAL_RANK", "RANK", "WORLD_SIZE"]
         },
     }
-
-
 
 
 def configure_expandable_segments() -> None:
